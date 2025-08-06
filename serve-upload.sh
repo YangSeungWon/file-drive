@@ -92,6 +92,9 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         .file-info { flex: 1; min-width: 0; }
         .file-link { text-decoration: none; color: #333; display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .file-size { color: #888; font-size: 12px; margin-top: 2px; }
+        .delete-btn { padding: 4px 8px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-left: 8px; opacity: 0.9; }
+        .delete-btn:hover { opacity: 1; }
+        .delete-btn:active { transform: scale(0.95); }
         .dir .file-link { color: #2196F3; font-weight: 500; }
         .empty { text-align: center; padding: 40px; color: #999; }
         
@@ -189,12 +192,13 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
                 icon = '📎'
             
             self.wfile.write(f'''
-                <li class="file-item" onclick="location.href='{url}'">
-                    <span class="file-icon">{icon}</span>
-                    <div class="file-info">
+                <li class="file-item">
+                    <span class="file-icon" onclick="location.href='{url}'">{icon}</span>
+                    <div class="file-info" onclick="location.href='{url}'">
                         <a href="{url}" class="file-link" onclick="event.stopPropagation()">{name}</a>
                         <span class="file-size">{size_str}</span>
                     </div>
+                    <button class="delete-btn" onclick="deleteFile('{name}')">삭제</button>
                 </li>
             '''.encode())
         
@@ -242,6 +246,17 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
                 }, 100);
             }
         });
+        
+        // 파일 삭제 함수
+        function deleteFile(filename) {
+            if (confirm('"' + filename + '" 파일을 삭제하시겠습니까?')) {
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/?delete=' + encodeURIComponent(filename);
+                document.body.appendChild(form);
+                form.submit();
+            }
+        }
     </script>
 </body>
 </html>''')
@@ -256,6 +271,24 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_POST(self):
         if not self.authenticate(): return
+        
+        # 삭제 요청 처리
+        if '?delete=' in self.path:
+            import urllib.parse
+            filename = urllib.parse.unquote(self.path.split('?delete=')[1])
+            filepath = os.path.join(os.getcwd(), filename)
+            if os.path.exists(filepath) and os.path.isfile(filepath):
+                try:
+                    os.remove(filepath)
+                except Exception as e:
+                    self.send_error(500, f"Error deleting file: {e}")
+                    return
+            self.send_response(303)
+            self.send_header('Location', '/')
+            self.end_headers()
+            return
+        
+        # 업로드 처리
         ctype, pdict = cgi.parse_header(self.headers.get('content-type'))
         if ctype != 'multipart/form-data':
             self.send_error(400, "Bad request: not multipart/form-data")
