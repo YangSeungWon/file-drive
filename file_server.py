@@ -12,6 +12,10 @@ from urllib.parse import quote, unquote
 import sys
 import argparse
 import getpass
+import time
+from datetime import datetime
+import hashlib
+import json
 
 class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
     """HTTP request handler with upload and authentication support"""
@@ -92,16 +96,29 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         # Add files
         for name in files:
             url = quote(name)
-            size = os.path.getsize(os.path.join(path, name))
+            full_path = os.path.join(path, name)
+            size = os.path.getsize(full_path)
             size_str = self.format_size(size)
             icon = self.get_file_icon(name)
             
+            # Get file modification time and hash
+            mtime = os.path.getmtime(full_path)
+            time_str = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M')
+            
+            # Calculate file hash (first 16 chars of SHA256)
+            with open(full_path, 'rb') as f:
+                file_hash = hashlib.sha256(f.read()).hexdigest()[:16]
+            
             items_html += f'''
-                <li class="file-item">
+                <li class="file-item" data-hash="{file_hash}">
                     <span class="file-icon" onclick="location.href='{url}'">{icon}</span>
                     <div class="file-info" onclick="location.href='{url}'">
                         <a href="{url}" class="file-link" onclick="event.stopPropagation()">{name}</a>
-                        <span class="file-size">{size_str}</span>
+                        <div class="file-meta">
+                            <span class="file-size">{size_str}</span>
+                            <span class="file-time">{time_str}</span>
+                            <span class="file-hash" title="해시: {file_hash}">🔒 {file_hash[:8]}...</span>
+                        </div>
                     </div>
                     <button class="delete-btn" onclick="deleteFile('{name}')">삭제</button>
                 </li>
@@ -148,7 +165,15 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         .file-icon {{ margin-right: 12px; font-size: 24px; min-width: 24px; }}
         .file-info {{ flex: 1; min-width: 0; }}
         .file-link {{ text-decoration: none; color: #333; display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-        .file-size {{ color: #888; font-size: 12px; margin-top: 2px; }}
+        .file-meta {{ display: flex; gap: 12px; margin-top: 2px; flex-wrap: wrap; }}
+        .file-size {{ color: #888; font-size: 12px; }}
+        .file-time {{ color: #999; font-size: 12px; }}
+        .file-hash {{ color: #6a9fb5; font-size: 11px; font-family: monospace; cursor: help; }}
+        .uploading-overlay {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000; }}
+        .uploading-overlay.show {{ display: flex; }}
+        .uploading-box {{ background: white; padding: 30px; border-radius: 8px; text-align: center; }}
+        .spinner {{ border: 3px solid #f3f3f3; border-top: 3px solid #4CAF50; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }}
+        @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
         .delete-btn {{ padding: 4px 8px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-left: 8px; opacity: 0.9; }}
         .delete-btn:hover {{ opacity: 1; }}
         .delete-btn:active {{ transform: scale(0.95); }}
@@ -232,11 +257,77 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         // 자동 업로드 (선택 즉시)
         document.getElementById('fileInput').addEventListener('change', function() {{
             if (this.files.length > 0) {{
-                setTimeout(() => {{
-                    document.getElementById('uploadForm').submit();
-                }}, 100);
+                uploadFile();
             }}
         }});
+        
+        async function uploadFile() {{
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            
+            // 파일 해시 계산
+            const fileHash = await calculateFileHash(file);
+            
+            // 서버의 파일 해시 목록 가져오기
+            const response = await fetch('/api/files');
+            const serverFiles = await response.json();
+            
+            // 같은 이름의 파일이 있는지 확인
+            if (serverFiles[file.name]) {{
+                if (serverFiles[file.name] === fileHash.substring(0, 16)) {{
+                    if (confirm(`"⚠️ ${{file.name}}"은(는) 이미 동일한 파일이 존재합니다 (해시: ${{fileHash.substring(0, 8)}}...).\n\n그래도 업로드하시겠습니까?`)) {{
+                        submitUploadForm();
+                    }} else {{
+                        cancelFile();
+                        return;
+                    }}
+                }} else {{
+                    // 다른 해시면 파일명에 postfix 추가
+                    const nameParts = file.name.split('.');
+                    const ext = nameParts.length > 1 ? '.' + nameParts.pop() : '';
+                    const baseName = nameParts.join('.');
+                    const timestamp = new Date().getTime();
+                    const newName = `${{baseName}}_${{timestamp}}${{ext}}`;
+                    
+                    // 파일 이름 변경을 위해 새 File 객체 생성
+                    const newFile = new File([file], newName, {{ type: file.type }});
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.items.add(newFile);
+                    fileInput.files = dataTransfer.files;
+                    
+                    alert(`파일명이 같지만 내용이 다른 파일이 있어 "${{newName}}"으로 저장합니다.`);
+                    submitUploadForm();
+                }}
+            }} else {{
+                submitUploadForm();
+            }}
+        }}
+        
+        function submitUploadForm() {{
+            // 로딩 오버레이 추가
+            const overlay = document.createElement('div');
+            overlay.className = 'uploading-overlay show';
+            overlay.innerHTML = `
+                <div class="uploading-box">
+                    <div class="spinner"></div>
+                    <div>파일 업로드 중...</div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            
+            // 폼 제출
+            setTimeout(() => {{
+                document.getElementById('uploadForm').submit();
+            }}, 100);
+        }}
+        
+        async function calculateFileHash(file) {{
+            const buffer = await file.arrayBuffer();
+            const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            return hashHex;
+        }}
         
         // 파일 삭제 함수
         function deleteFile(filename) {{
@@ -249,6 +340,12 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
             }}
         }}
     </script>
+    <div class="uploading-overlay" id="uploadingOverlay">
+        <div class="uploading-box">
+            <div class="spinner"></div>
+            <div>파일 업로드 중...</div>
+        </div>
+    </div>
 </body>
 </html>'''
     
@@ -283,10 +380,29 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         """Handle GET requests"""
         if self.path == '/':
             return self.list_directory(os.getcwd())
+        elif self.path == '/api/files':
+            return self.get_file_hashes()
         else:
             if not self.authenticate():
                 return
             return http.server.SimpleHTTPRequestHandler.do_GET(self)
+    
+    def get_file_hashes(self):
+        """Return JSON with file hashes"""
+        if not self.authenticate():
+            return
+        
+        file_hashes = {}
+        for filename in os.listdir(os.getcwd()):
+            if os.path.isfile(filename):
+                with open(filename, 'rb') as f:
+                    file_hash = hashlib.sha256(f.read()).hexdigest()[:16]
+                    file_hashes[filename] = file_hash
+        
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps(file_hashes).encode())
     
     def do_POST(self):
         """Handle POST requests (upload and delete)"""
@@ -373,7 +489,8 @@ def main():
     AuthUploadHandler.auth_key = base64.b64encode(auth_string.encode()).decode()
     AuthUploadHandler.upload_dir = args.directory
     
-    # Start server
+    # Start server with SO_REUSEADDR option
+    socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", args.port), AuthUploadHandler) as httpd:
         print(f"Serving HTTP on 0.0.0.0 port {args.port} (dir: {os.getcwd()})...")
         print(f"Access at: http://localhost:{args.port}")
@@ -381,6 +498,8 @@ def main():
             httpd.serve_forever()
         except KeyboardInterrupt:
             print("\nServer stopped.")
+        finally:
+            httpd.server_close()
 
 
 if __name__ == '__main__':
