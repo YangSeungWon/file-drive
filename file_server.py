@@ -322,6 +322,15 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
             submitUploadForm(file, currentUploadIndex, uploadQueue.length);
         }}
         
+        function formatBytes(bytes, decimals = 1) {{
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }}
+
         function submitUploadForm(file, index, total) {{
             // 로딩 오버레이 추가 또는 업데이트
             let overlay = document.getElementById('uploadOverlay');
@@ -341,7 +350,7 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
                         <div class="progress-bar">
                             <div class="progress-fill" id="progressFill" style="width: 0%"></div>
                         </div>
-                        <div class="progress-text" id="progressText">0%</div>
+                        <div class="progress-text" id="progressText">업로드 준비 중...</div>
                     </div>
                 </div>
             `;
@@ -356,11 +365,36 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
             const formData = new FormData();
             formData.append('file', file);
 
+            let startTime = Date.now();
+            let lastLoaded = 0;
+
             xhr.upload.addEventListener('progress', function(e) {{
                 if (e.lengthComputable) {{
                     const percentComplete = Math.round((e.loaded / e.total) * 100);
+                    const loaded = formatBytes(e.loaded);
+                    const total = formatBytes(e.total);
+
+                    // 속도 계산
+                    const currentTime = Date.now();
+                    const timeDiff = (currentTime - startTime) / 1000; // 초 단위
+                    const speed = timeDiff > 0 ? e.loaded / timeDiff : 0;
+                    const speedStr = formatBytes(speed) + '/s';
+
+                    // 남은 시간 계산
+                    const remaining = e.total - e.loaded;
+                    const eta = speed > 0 ? remaining / speed : 0;
+                    let etaStr = '';
+                    if (eta > 60) {{
+                        etaStr = ` (약 ${{Math.ceil(eta / 60)}}분)`;
+                    }} else if (eta > 0) {{
+                        etaStr = ` (약 ${{Math.ceil(eta)}}초)`;
+                    }}
+
                     document.getElementById('progressFill').style.width = percentComplete + '%';
-                    document.getElementById('progressText').textContent = percentComplete + '%';
+                    document.getElementById('progressText').innerHTML = `
+                        <div>${{percentComplete}}% - ${{loaded}} / ${{total}}</div>
+                        <div style="font-size: 12px; color: #888; margin-top: 4px;">${{speedStr}}${{etaStr}}</div>
+                    `;
                 }}
             }});
 
