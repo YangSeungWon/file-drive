@@ -73,19 +73,32 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
     
     def generate_html(self, path, file_list):
         """Generate the HTML page"""
-        # Separate directories and files
+        # Separate directories and files with modification time
         dirs = []
-        files = []
-        for name in sorted(file_list):
+        files_with_time = []
+        for name in file_list:
             full_path = os.path.join(path, name)
             if os.path.isdir(full_path):
                 dirs.append(name)
             else:
-                files.append(name)
-        
+                mtime = os.path.getmtime(full_path)
+                files_with_time.append((name, mtime))
+
+        # Sort directories alphabetically
+        dirs.sort()
+
+        # Sort files by modification time (newest first)
+        files_with_time.sort(key=lambda x: x[1], reverse=True)
+
+        # Get the most recent file (if any)
+        most_recent_file = files_with_time[0][0] if files_with_time else None
+
+        # Check if file was uploaded in the last 5 minutes
+        recent_threshold = time.time() - (5 * 60)  # 5 minutes ago
+
         # Build file items HTML
         items_html = ""
-        
+
         # Add directories first
         for name in dirs:
             url = quote(name)
@@ -97,9 +110,9 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
                     </div>
                 </li>
             '''
-        
-        # Add files
-        for name in files:
+
+        # Add files (sorted by modification time, newest first)
+        for name, mtime in files_with_time:
             url = quote(name)
             full_path = os.path.join(path, name)
             size = os.path.getsize(full_path)
@@ -113,12 +126,17 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
             # Calculate file hash (first 16 chars of SHA256)
             with open(full_path, 'rb') as f:
                 file_hash = hashlib.sha256(f.read()).hexdigest()[:16]
-            
+
+            # Check if this is a recent file (uploaded within last 5 minutes)
+            is_recent = mtime > recent_threshold
+            recent_class = ' recent' if is_recent else ''
+            new_badge = ' <span class="new-badge">NEW</span>' if is_recent else ''
+
             items_html += f'''
-                <li class="file-item" data-hash="{file_hash}">
+                <li class="file-item{recent_class}" data-hash="{file_hash}" data-mtime="{mtime}">
                     <span class="file-icon" onclick="location.href='{url}'">{icon}</span>
                     <div class="file-info" onclick="location.href='{url}'">
-                        <a href="{url}" class="file-link" onclick="event.stopPropagation()">{name}</a>
+                        <a href="{url}" class="file-link" onclick="event.stopPropagation()">{name}</a>{new_badge}
                         <div class="file-meta">
                             <span class="file-size">{size_str}</span>
                             <span class="file-time">{time_str}</span>
@@ -164,9 +182,22 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         
         .files-section {{ padding: 12px; }}
         .file-list {{ list-style: none; }}
-        .file-item {{ display: flex; align-items: center; padding: 12px; border-radius: 6px; margin-bottom: 4px; transition: background 0.2s; cursor: pointer; }}
+        .file-item {{ display: flex; align-items: center; padding: 12px; border-radius: 6px; margin-bottom: 4px; transition: all 0.3s; cursor: pointer; position: relative; }}
         .file-item:active {{ background: #e0e0e0; }}
         .file-item:hover {{ background: #f5f5f5; }}
+        .file-item.recent {{ background: #e8f5e9; border: 1px solid #4CAF50; animation: highlight 2s ease-in-out; }}
+        .file-item.recent:hover {{ background: #c8e6c9; }}
+        @keyframes highlight {{
+            0% {{ background: #a5d6a7; transform: scale(1.02); }}
+            50% {{ background: #c8e6c9; }}
+            100% {{ background: #e8f5e9; transform: scale(1); }}
+        }}
+        .new-badge {{ display: inline-block; margin-left: 8px; padding: 2px 6px; background: #4CAF50; color: white; border-radius: 3px; font-size: 10px; font-weight: bold; animation: pulse 1.5s infinite; }}
+        @keyframes pulse {{
+            0% {{ opacity: 1; }}
+            50% {{ opacity: 0.7; }}
+            100% {{ opacity: 1; }}
+        }}
         .file-icon {{ margin-right: 12px; font-size: 24px; min-width: 24px; }}
         .file-info {{ flex: 1; min-width: 0; }}
         .file-link {{ text-decoration: none; color: #333; display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
