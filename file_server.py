@@ -314,6 +314,7 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         async function uploadNextFile() {{
             if (currentUploadIndex >= uploadQueue.length) {{
                 // 모든 파일 업로드 완료
+                window.onbeforeunload = null; // 페이지 이탈 방지 해제
                 window.location.href = '/';
                 return;
             }}
