@@ -337,6 +337,12 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
 
             if (filesToUpload.length === 0) {{
                 alert('모든 파일이 이미 존재합니다.');
+                // 업로드 오버레이 제거
+                const overlay = document.getElementById('uploadOverlay');
+                if (overlay) {{
+                    overlay.remove();
+                }}
+                window.onbeforeunload = null; // 페이지 이탈 방지 해제
                 cancelFile();
                 return;
             }}
