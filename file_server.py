@@ -37,12 +37,15 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
             self.do_AUTHHEAD()
             self.wfile.write(b'401 Unauthorized')
             return False
-        
+
         token = auth_header.split()[1]
         if token != self.auth_key:
             self.do_AUTHHEAD()
             self.wfile.write(b'401 Unauthorized')
             return False
+
+        # 인증 성공시 쿠키 설정
+        self.auth_cookie = f"auth={token}; Path=/; HttpOnly"
         return True
     
     def list_directory(self, path):
@@ -59,6 +62,8 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         # Send response headers
         self.send_response(200)
         self.send_header("Content-type", "text/html; charset=utf-8")
+        if hasattr(self, 'auth_cookie'):
+            self.send_header("Set-Cookie", self.auth_cookie)
         self.end_headers()
         
         # Generate HTML
@@ -169,10 +174,15 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         .file-size {{ color: #888; font-size: 12px; }}
         .file-time {{ color: #999; font-size: 12px; }}
         .file-hash {{ color: #6a9fb5; font-size: 11px; font-family: monospace; cursor: help; }}
-        .uploading-overlay {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000; }}
+        .uploading-overlay {{ position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 1000; }}
         .uploading-overlay.show {{ display: flex; }}
-        .uploading-box {{ background: white; padding: 30px; border-radius: 8px; text-align: center; }}
+        .uploading-box {{ background: white; padding: 30px; border-radius: 8px; text-align: center; min-width: 280px; }}
         .spinner {{ border: 3px solid #f3f3f3; border-top: 3px solid #4CAF50; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 20px; }}
+        .upload-progress {{ margin-top: 16px; }}
+        .progress-bar {{ width: 100%; height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; }}
+        .progress-fill {{ height: 100%; background: #4CAF50; transition: width 0.3s; border-radius: 4px; }}
+        .progress-text {{ margin-top: 8px; font-size: 14px; color: #666; }}
+        .upload-filename {{ margin-bottom: 16px; font-size: 14px; color: #333; font-weight: 500; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
         @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
         .delete-btn {{ padding: 4px 8px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; margin-left: 8px; opacity: 0.9; }}
         .delete-btn:hover {{ opacity: 1; }}
@@ -264,14 +274,14 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         async function uploadFile() {{
             const fileInput = document.getElementById('fileInput');
             const file = fileInput.files[0];
-            
+
             // 파일 해시 계산
             const fileHash = await calculateFileHash(file);
-            
+
             // 서버의 파일 해시 목록 가져오기
             const response = await fetch('/api/files');
             const serverFiles = await response.json();
-            
+
             // 같은 이름의 파일이 있는지 확인
             if (serverFiles[file.name]) {{
                 if (serverFiles[file.name] === fileHash.substring(0, 16)) {{
@@ -288,13 +298,13 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
                     const baseName = nameParts.join('.');
                     const timestamp = new Date().getTime();
                     const newName = `${{baseName}}_${{timestamp}}${{ext}}`;
-                    
+
                     // 파일 이름 변경을 위해 새 File 객체 생성
                     const newFile = new File([file], newName, {{ type: file.type }});
                     const dataTransfer = new DataTransfer();
                     dataTransfer.items.add(newFile);
                     fileInput.files = dataTransfer.files;
-                    
+
                     alert(`파일명이 같지만 내용이 다른 파일이 있어 "${{newName}}"으로 저장합니다.`);
                     submitUploadForm();
                 }}
@@ -304,21 +314,64 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         }}
         
         function submitUploadForm() {{
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+
             // 로딩 오버레이 추가
             const overlay = document.createElement('div');
             overlay.className = 'uploading-overlay show';
             overlay.innerHTML = `
                 <div class="uploading-box">
                     <div class="spinner"></div>
-                    <div>파일 업로드 중...</div>
+                    <div class="upload-filename">${{file.name}}</div>
+                    <div class="upload-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+                        </div>
+                        <div class="progress-text" id="progressText">0%</div>
+                    </div>
                 </div>
             `;
             document.body.appendChild(overlay);
-            
-            // 폼 제출
-            setTimeout(() => {{
-                document.getElementById('uploadForm').submit();
-            }}, 100);
+
+            // 페이지 이탈 방지
+            window.onbeforeunload = function(e) {{
+                return '파일 업로드가 진행 중입니다. 정말 페이지를 떠나시겠습니까?';
+            }};
+
+            // XMLHttpRequest로 업로드 진행률 추적
+            const xhr = new XMLHttpRequest();
+            const formData = new FormData(document.getElementById('uploadForm'));
+
+            xhr.upload.addEventListener('progress', function(e) {{
+                if (e.lengthComputable) {{
+                    const percentComplete = Math.round((e.loaded / e.total) * 100);
+                    document.getElementById('progressFill').style.width = percentComplete + '%';
+                    document.getElementById('progressText').textContent = percentComplete + '%';
+                }}
+            }});
+
+            xhr.addEventListener('load', function() {{
+                if (xhr.status === 303 || xhr.status === 200) {{
+                    window.onbeforeunload = null;
+                    window.location.href = '/';
+                }} else {{
+                    window.onbeforeunload = null;
+                    alert('업로드 실패: ' + xhr.statusText);
+                    overlay.remove();
+                    cancelFile();
+                }}
+            }});
+
+            xhr.addEventListener('error', function() {{
+                window.onbeforeunload = null;
+                alert('업로드 중 오류가 발생했습니다.');
+                overlay.remove();
+                cancelFile();
+            }});
+
+            xhr.open('POST', '/');
+            xhr.send(formData);
         }}
         
         async function calculateFileHash(file) {{
@@ -340,12 +393,6 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
             }}
         }}
     </script>
-    <div class="uploading-overlay" id="uploadingOverlay">
-        <div class="uploading-box">
-            <div class="spinner"></div>
-            <div>파일 업로드 중...</div>
-        </div>
-    </div>
 </body>
 </html>'''
     
