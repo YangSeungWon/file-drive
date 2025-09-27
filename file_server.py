@@ -147,7 +147,7 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
                 </li>
             '''
         
-        if not dirs and not files:
+        if not dirs and not files_with_time:
             items_html = '<div class="empty">No files uploaded yet</div>'
         
         return f'''<!DOCTYPE html>
