@@ -301,6 +301,9 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
 
             if (uploadQueue.length === 0) return;
 
+            // 즉시 업로드 준비 중 표시
+            showUploadPreparing(uploadQueue.length);
+
             // 서버의 파일 해시 목록 가져오기
             const response = await fetch('/api/files');
             const serverFiles = await response.json();
@@ -361,6 +364,34 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
             const sizes = ['B', 'KB', 'MB', 'GB'];
             const i = Math.floor(Math.log(bytes) / Math.log(k));
             return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }}
+
+        function showUploadPreparing(totalFiles) {{
+            let overlay = document.getElementById('uploadOverlay');
+            if (!overlay) {{
+                overlay = document.createElement('div');
+                overlay.id = 'uploadOverlay';
+                overlay.className = 'uploading-overlay show';
+                document.body.appendChild(overlay);
+            }}
+
+            overlay.innerHTML = `
+                <div class="uploading-box">
+                    <div class="spinner"></div>
+                    <div style="margin-bottom: 8px; color: #666;">파일 ${{totalFiles}}개 준비 중...</div>
+                    <div class="upload-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 0%"></div>
+                        </div>
+                        <div class="progress-text">파일 해시 계산 중...</div>
+                    </div>
+                </div>
+            `;
+
+            // 페이지 이탈 방지
+            window.onbeforeunload = function(e) {{
+                return '파일 업로드가 진행 중입니다. 정말 페이지를 떠나시겠습니까?';
+            }};
         }}
 
         function submitUploadForm(file, index, total) {{
