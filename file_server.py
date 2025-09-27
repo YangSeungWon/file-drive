@@ -218,14 +218,12 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
                     <label class="file-input-label">
                         <div class="icon">📤</div>
                         <div class="text">클릭하거나 파일을 드래그하세요</div>
-                        <div class="sub">모든 파일 형식 지원</div>
+                        <div class="sub">여러 파일 동시 선택 가능</div>
                         <input type="file" name="file" id="fileInput" onchange="fileSelected(this)" multiple>
                     </label>
                 </div>
-                <div class="selected-file" id="selectedFile">
+                <div class="selected-file" id="selectedFile" style="display: none;">
                     <span class="selected-file-name" id="fileName"></span>
-                    <button type="button" class="cancel-btn" onclick="cancelFile()">취소</button>
-                    <button type="submit" class="upload-btn">업로드</button>
                 </div>
             </form>
         </div>
@@ -254,9 +252,7 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         }}
         function fileSelected(input) {{
             if (input.files.length > 0) {{
-                const file = input.files[0];
-                document.getElementById('fileName').textContent = file.name;
-                document.getElementById('selectedFile').classList.add('show');
+                uploadFiles();
             }}
         }}
         function cancelFile() {{
@@ -264,65 +260,82 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
             document.getElementById('selectedFile').classList.remove('show');
         }}
         
-        // 자동 업로드 (선택 즉시)
-        document.getElementById('fileInput').addEventListener('change', function() {{
-            if (this.files.length > 0) {{
-                uploadFile();
-            }}
-        }});
-        
-        async function uploadFile() {{
-            const fileInput = document.getElementById('fileInput');
-            const file = fileInput.files[0];
+        let uploadQueue = [];
+        let currentUploadIndex = 0;
 
-            // 파일 해시 계산
-            const fileHash = await calculateFileHash(file);
+        async function uploadFiles() {{
+            const fileInput = document.getElementById('fileInput');
+            uploadQueue = Array.from(fileInput.files);
+            currentUploadIndex = 0;
+
+            if (uploadQueue.length === 0) return;
 
             // 서버의 파일 해시 목록 가져오기
             const response = await fetch('/api/files');
             const serverFiles = await response.json();
 
-            // 같은 이름의 파일이 있는지 확인
-            if (serverFiles[file.name]) {{
-                if (serverFiles[file.name] === fileHash.substring(0, 16)) {{
-                    if (confirm(`"⚠️ ${{file.name}}"은(는) 이미 동일한 파일이 존재합니다 (해시: ${{fileHash.substring(0, 8)}}...).\n\n그래도 업로드하시겠습니까?`)) {{
-                        submitUploadForm();
+            // 모든 파일 처리
+            const filesToUpload = [];
+            for (let i = 0; i < uploadQueue.length; i++) {{
+                const file = uploadQueue[i];
+                const fileHash = await calculateFileHash(file);
+
+                // 같은 이름의 파일이 있는지 확인
+                if (serverFiles[file.name]) {{
+                    if (serverFiles[file.name] === fileHash.substring(0, 16)) {{
+                        // 동일한 파일이면 건너뛰기
+                        console.log(`스킵: ${{file.name}} (동일한 파일 존재)`);
+                        continue;
                     }} else {{
-                        cancelFile();
-                        return;
+                        // 다른 해시면 파일명에 postfix 추가
+                        const nameParts = file.name.split('.');
+                        const ext = nameParts.length > 1 ? '.' + nameParts.pop() : '';
+                        const baseName = nameParts.join('.');
+                        const timestamp = new Date().getTime();
+                        const newName = `${{baseName}}_${{timestamp}}${{ext}}`;
+                        const newFile = new File([file], newName, {{ type: file.type }});
+                        filesToUpload.push(newFile);
                     }}
                 }} else {{
-                    // 다른 해시면 파일명에 postfix 추가
-                    const nameParts = file.name.split('.');
-                    const ext = nameParts.length > 1 ? '.' + nameParts.pop() : '';
-                    const baseName = nameParts.join('.');
-                    const timestamp = new Date().getTime();
-                    const newName = `${{baseName}}_${{timestamp}}${{ext}}`;
-
-                    // 파일 이름 변경을 위해 새 File 객체 생성
-                    const newFile = new File([file], newName, {{ type: file.type }});
-                    const dataTransfer = new DataTransfer();
-                    dataTransfer.items.add(newFile);
-                    fileInput.files = dataTransfer.files;
-
-                    alert(`파일명이 같지만 내용이 다른 파일이 있어 "${{newName}}"으로 저장합니다.`);
-                    submitUploadForm();
+                    filesToUpload.push(file);
                 }}
-            }} else {{
-                submitUploadForm();
             }}
+
+            if (filesToUpload.length === 0) {{
+                alert('모든 파일이 이미 존재합니다.');
+                cancelFile();
+                return;
+            }}
+
+            uploadQueue = filesToUpload;
+            uploadNextFile();
+        }}
+
+        async function uploadNextFile() {{
+            if (currentUploadIndex >= uploadQueue.length) {{
+                // 모든 파일 업로드 완료
+                window.location.href = '/';
+                return;
+            }}
+
+            const file = uploadQueue[currentUploadIndex];
+            submitUploadForm(file, currentUploadIndex, uploadQueue.length);
         }}
         
-        function submitUploadForm() {{
-            const fileInput = document.getElementById('fileInput');
-            const file = fileInput.files[0];
+        function submitUploadForm(file, index, total) {{
+            // 로딩 오버레이 추가 또는 업데이트
+            let overlay = document.getElementById('uploadOverlay');
+            if (!overlay) {{
+                overlay = document.createElement('div');
+                overlay.id = 'uploadOverlay';
+                overlay.className = 'uploading-overlay show';
+                document.body.appendChild(overlay);
+            }}
 
-            // 로딩 오버레이 추가
-            const overlay = document.createElement('div');
-            overlay.className = 'uploading-overlay show';
             overlay.innerHTML = `
                 <div class="uploading-box">
                     <div class="spinner"></div>
+                    <div style="margin-bottom: 8px; color: #666;">파일 ${{index + 1}} / ${{total}}</div>
                     <div class="upload-filename">${{file.name}}</div>
                     <div class="upload-progress">
                         <div class="progress-bar">
@@ -332,7 +345,6 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
                     </div>
                 </div>
             `;
-            document.body.appendChild(overlay);
 
             // 페이지 이탈 방지
             window.onbeforeunload = function(e) {{
@@ -341,7 +353,8 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
 
             // XMLHttpRequest로 업로드 진행률 추적
             const xhr = new XMLHttpRequest();
-            const formData = new FormData(document.getElementById('uploadForm'));
+            const formData = new FormData();
+            formData.append('file', file);
 
             xhr.upload.addEventListener('progress', function(e) {{
                 if (e.lengthComputable) {{
@@ -353,21 +366,24 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
 
             xhr.addEventListener('load', function() {{
                 if (xhr.status === 303 || xhr.status === 200) {{
+                    currentUploadIndex++;
+                    uploadNextFile();
+                }} else if (xhr.status === 401) {{
                     window.onbeforeunload = null;
-                    window.location.href = '/';
-                }} else {{
-                    window.onbeforeunload = null;
-                    alert('업로드 실패: ' + xhr.statusText);
+                    alert('인증이 필요합니다. 페이지를 새로고침하세요.');
                     overlay.remove();
-                    cancelFile();
+                }} else {{
+                    // 오류 발생시 다음 파일로 진행
+                    console.error(`업로드 실패: ${{file.name}}`);
+                    currentUploadIndex++;
+                    uploadNextFile();
                 }}
             }});
 
             xhr.addEventListener('error', function() {{
-                window.onbeforeunload = null;
-                alert('업로드 중 오류가 발생했습니다.');
-                overlay.remove();
-                cancelFile();
+                console.error(`업로드 오류: ${{file.name}}`);
+                currentUploadIndex++;
+                uploadNextFile();
             }});
 
             xhr.open('POST', '/');
