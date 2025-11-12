@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  file-server:
+    build: .
+    container_name: file-drive-server
+    ports:
+      - "${PORT:-7113}:7113"
+    environment:
+      - USER=${USER:-admin}
+      - PASSWORD=${PASSWORD:-password}
+      - PORT=7113
+      - UPLOAD_DIR=/app/uploads
+    volumes:
+      # Mount uploads directory to persist files
+      - ./uploads:/app/uploads
+    restart: unless-stopped
+    stdin_open: true
+    tty: true

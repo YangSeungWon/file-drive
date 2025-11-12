@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Uploads (will be mounted as volume)
+uploads/
+
+# Backups
+*.bak
+
+# Media files in root (these seem to be test files)
+*.mp4
+*.mov
+*.png
+*.pdf
+*.pptx
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+README.md
+CLAUDE.md
