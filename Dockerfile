@@ -16,8 +16,8 @@ RUN mkdir -p /app/uploads
 EXPOSE 7113
 
 # Set environment variables with defaults
-ENV USER=admin
-ENV PASSWORD=password
+ENV SERVER_USER=admin
+ENV SERVER_PASSWORD=password
 ENV PORT=7113
 ENV UPLOAD_DIR=/app/uploads
 

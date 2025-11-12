@@ -44,8 +44,8 @@ docker build -t file-drive-server .
 ```bash
 docker run -d \
   -p 7113:7113 \
-  -e USER=admin \
-  -e PASSWORD=yourpassword \
+  -e SERVER_USER=admin \
+  -e SERVER_PASSWORD=yourpassword \
   -v $(pwd)/uploads:/app/uploads \
   --name file-server \
   file-drive-server
@@ -63,8 +63,8 @@ Configure via environment variables in `.env` file or docker-compose.yml:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `USER` | Username for Basic Auth | `admin` |
-| `PASSWORD` | Password for Basic Auth | `password` |
+| `SERVER_USER` | Username for Basic Auth | `admin` |
+| `SERVER_PASSWORD` | Password for Basic Auth | `password` |
 | `PORT` | Server port (host side) | `7113` |
 
 ## Features

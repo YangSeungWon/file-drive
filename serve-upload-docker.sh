@@ -5,8 +5,8 @@
 # Use environment variables or defaults
 PORT=${PORT:-7113}
 DIR=${UPLOAD_DIR:-/app/uploads}
-USER=${USER:-admin}
-PASS=${PASSWORD:-password}
+USER=${SERVER_USER:-admin}
+PASS=${SERVER_PASSWORD:-password}
 
 # 1) Directory check
 if [[ ! -d "$DIR" ]]; then
@@ -207,7 +207,7 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         if not dirs and not files_list:
             self.wfile.write(b'<div class="empty">No files uploaded yet</div>')
 
-        self.wfile.write(b'''
+        self.wfile.write('''
             </ul>
         </div>
     </div>
@@ -261,7 +261,7 @@ class AuthUploadHandler(http.server.SimpleHTTPRequestHandler):
         }
     </script>
 </body>
-</html>''')
+</html>'''.encode())
         return None
 
     def do_GET(self):

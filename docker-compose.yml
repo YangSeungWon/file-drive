@@ -7,8 +7,8 @@ services:
     ports:
       - "${PORT:-7113}:7113"
     environment:
-      - USER=${USER:-admin}
-      - PASSWORD=${PASSWORD:-password}
+      - SERVER_USER=${SERVER_USER:-admin}
+      - SERVER_PASSWORD=${SERVER_PASSWORD:-password}
       - PORT=7113
       - UPLOAD_DIR=/app/uploads
     volumes:
